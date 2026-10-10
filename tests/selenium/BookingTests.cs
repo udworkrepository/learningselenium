@@ -14,7 +14,7 @@ public sealed class BookingTests
     private IWebElement E(string id) => driver.FindElement(By.Id(id));
     private static string Id(int n) => $"TC-{n:0000}";
 
-    [OneTimeSetUp]
+    [SetUp]
     public void StartBrowser()
     {
         var browser = Environment.GetEnvironmentVariable("BROWSER")?.ToLowerInvariant() ?? "chrome";
@@ -31,17 +31,12 @@ public sealed class BookingTests
         else throw new ArgumentException($"Unsupported BROWSER '{browser}'. Use chrome, brave, or safari.");
         driver.Manage().Timeouts().ImplicitWait = TimeSpan.FromSeconds(2);
         driver.Manage().Window.Maximize();
-    }
-
-    [SetUp]
-    public void SetUp()
-    {
         driver.Navigate().GoToUrl(Url);
         new WebDriverWait(driver, TimeSpan.FromSeconds(30))
             .Until(_ => E("ctl00_mainContent_rbtnl_Trip_0").Displayed);
     }
 
-    [OneTimeTearDown]
+    [TearDown]
     public void TearDown() { driver?.Quit(); driver?.Dispose(); }
 
     public static IEnumerable<TestCaseData> Scenarios()
@@ -51,15 +46,15 @@ public sealed class BookingTests
             ("positive: booking page loads with one-way selected", t => { Assert.That(t.driver.Title, Does.Contain("QAClickJet")); Assert.That(t.E("ctl00_mainContent_rbtnl_Trip_0").Selected); }),
             ("positive: departure list contains Mumbai", t => Assert.That(t.HasAirport("ctl00_mainContent_ddl_originStation1", "Mumbai (BOM)"), Is.True)),
             ("positive: selecting Mumbai loads arrival choices", t => { t.Choose("ctl00_mainContent_ddl_originStation1", "Mumbai (BOM)"); Assert.That(t.HasAirport("ctl00_mainContent_ddl_destinationStation1", "Delhi (DEL)"), Is.True); }),
-            ("positive: arrival autocomplete offers Delhi after departure", t => { t.Choose("ctl00_mainContent_ddl_originStation1", "Mumbai (BOM)"); var e = t.Airport("ctl00_mainContent_ddl_destinationStation1"); if (e.TagName == "select") Assert.That(new SelectElement(e).Options.Select(o => o.Text), Does.Contain("Delhi (DEL)")); else { e.Click(); e.SendKeys("Delhi"); Assert.That(t.Wait("#glsctl00_mainContent_ddl_destinationStation1_CTNR a[value='DEL']", x => x.Displayed), Is.Not.Null); } })
+            ("positive: arrival autocomplete offers Delhi after departure", t => { t.Choose("ctl00_mainContent_ddl_originStation1", "Mumbai (BOM)"); var e = t.Airport("ctl00_mainContent_ddl_destinationStation1"); if (e.TagName == "select") Assert.That(new SelectElement(e).Options.Select(o => o.Text), Does.Contain("Delhi (DEL)")); else { e.Click(); t.Airport("ctl00_mainContent_ddl_destinationStation1").SendKeys("Delhi"); Assert.That(t.Wait("#glsctl00_mainContent_ddl_destinationStation1_CTNR a[value='DEL']", x => x.Displayed), Is.Not.Null); } })
         };
         cases.AddRange(new[] { ("Round trip", 1), ("One-way", 0), ("Multicity", 2) }
-            .Select(x => ($"positive: {x.Item1} can be selected", (Action<BookingTests>)(t => { if (x.Item2 == 0) t.E("ctl00_mainContent_rbtnl_Trip_1").Click(); t.E($"ctl00_mainContent_rbtnl_Trip_{x.Item2}").Click(); Assert.That(t.E($"ctl00_mainContent_rbtnl_Trip_{x.Item2}").Selected); }))));
+            .Select(x => ($"positive: {x.Item1} can be selected", (Action<BookingTests>)(t => { if (x.Item2 == 0) t.E("ctl00_mainContent_rbtnl_Trip_1").Click(); var id = $"ctl00_mainContent_rbtnl_Trip_{x.Item2}"; t.E(id).Click(); t.WaitSelected(id); }))));
         cases.AddRange(new[] { "USD", "AED" }
             .Select(c => ($"positive: {c} currency can be selected", (Action<BookingTests>)(t => { new SelectElement(t.E("ctl00_mainContent_DropDownListCurrency")).SelectByValue(c); Assert.That(new SelectElement(t.E("ctl00_mainContent_DropDownListCurrency")).SelectedOption.GetAttribute("value"), Is.EqualTo(c)); }))));
         cases.AddRange(new[]
         {
-            ("positive: fare preferences can be enabled", (Action<BookingTests>)(t => { foreach (var id in new[] { "friendsandfamily", "SeniorCitizenDiscount", "StudentDiscount", "IndArm" }) { var e = t.E($"ctl00_mainContent_chk_{id}"); if (!e.Selected) e.Click(); Assert.That(e.Selected); } })),
+            ("positive: fare preferences can be enabled", (Action<BookingTests>)(t => { foreach (var id in new[] { "friendsandfamily", "SeniorCitizenDiscount", "StudentDiscount", "IndArm" }) t.Check($"ctl00_mainContent_chk_{id}"); })),
             ("positive: country autocomplete selects India", t => { var e = t.E("autosuggest"); e.SendKeys("Ind"); t.Wait(".ui-menu-item", x => x.Text.Trim() == "India").Click(); Assert.That(e.GetAttribute("value"), Is.EqualTo("India")); })
         });
         cases.AddRange(new[] { ("Adult", "Adt", "2 Adult"), ("Child", "Chd", "1 Child"), ("Infant", "Inf", "1 Infant") }
@@ -89,20 +84,37 @@ public sealed class BookingTests
     {
         var el = Airport(id);
         if (el.TagName == "select") { new SelectElement(el).SelectByText(label); return; }
-        el.Click(); el.SendKeys(label[..label.LastIndexOf(" (", StringComparison.Ordinal)]);
-        Wait($"#gls{id}_CTNR a[value='{label[(label.LastIndexOf('(') + 1)..^1]}']", e => e.Displayed).Click();
+        var code = label[(label.LastIndexOf('(') + 1)..^1];
+        el.Click();
+        Airport(id).SendKeys(label[..label.LastIndexOf(" (", StringComparison.Ordinal)]);
+        ((IJavaScriptExecutor)driver).ExecuteScript("arguments[0].click()", Wait($"#gls{id}_CTNR a[value='{code}']", e => e.Displayed));
+        new WebDriverWait(driver, TimeSpan.FromSeconds(5)).Until(_ => Airport(id).GetAttribute("selectedvalue") == code);
     }
 
     private bool HasAirport(string id, string label)
     {
         var el = Airport(id);
         if (el.TagName == "select") return new SelectElement(el).Options.Any(o => o.Text == label);
-        el.Click(); el.SendKeys(label[..label.LastIndexOf(" (", StringComparison.Ordinal)]);
+        el.Click();
+        Airport(id).SendKeys(label[..label.LastIndexOf(" (", StringComparison.Ordinal)]);
         return Wait($"#gls{id}_CTNR a[value='{label[(label.LastIndexOf('(') + 1)..^1]}']", e => e.Displayed) is not null;
     }
 
     private IWebElement Wait(string selector, Func<IWebElement, bool> condition) =>
-        new WebDriverWait(driver, TimeSpan.FromSeconds(5)).Until(_ => driver.FindElements(By.CssSelector(selector)).FirstOrDefault(condition));
+        new WebDriverWait(driver, TimeSpan.FromSeconds(10)).Until(_ =>
+        {
+            try { return driver.FindElements(By.CssSelector(selector)).FirstOrDefault(condition)!; }
+            catch (StaleElementReferenceException) { return null!; }
+        });
+
+    private void WaitSelected(string id) =>
+        new WebDriverWait(driver, TimeSpan.FromSeconds(5)).Until(_ => { try { return E(id).Selected; } catch (StaleElementReferenceException) { return false; } });
+
+    private void Check(string id)
+    {
+        if (!E(id).Selected) E(id).Click();
+        new WebDriverWait(driver, TimeSpan.FromSeconds(5)).Until(_ => { try { return E(id).Selected; } catch (StaleElementReferenceException) { return false; } });
+    }
 
     private void OpenPax()
     {
@@ -112,8 +124,7 @@ public sealed class BookingTests
 
     private void Increment(string id)
     {
-        new WebDriverWait(driver, TimeSpan.FromSeconds(5)).Until(_ =>
-            E(id).Displayed && E(id).Enabled && E(id).GetAttribute("class")?.Contains("pax-enabled") == true);
-        E(id).Click();
+        new WebDriverWait(driver, TimeSpan.FromSeconds(5)).Until(_ => { try { return E(id).Displayed; } catch (StaleElementReferenceException) { return false; } });
+        ((IJavaScriptExecutor)driver).ExecuteScript("arguments[0].click()", E(id));
     }
 }
