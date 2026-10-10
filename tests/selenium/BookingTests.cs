@@ -18,7 +18,7 @@ public sealed class BookingTests
     public void StartBrowser()
     {
         var browser = Environment.GetEnvironmentVariable("BROWSER")?.ToLowerInvariant() ?? "chrome";
-        if (browser == "safari") driver = new SafariDriver(new SafariOptions { PageLoadStrategy = PageLoadStrategy.Eager });
+        if (browser == "safari") driver = new SafariDriver(new SafariOptions { PageLoadStrategy = PageLoadStrategy.None });
         else if (browser is "chrome" or "brave")
         {
             var options = new ChromeOptions { PageLoadStrategy = PageLoadStrategy.Eager };
@@ -34,7 +34,12 @@ public sealed class BookingTests
     }
 
     [SetUp]
-    public void SetUp() => driver.Navigate().GoToUrl(Url);
+    public void SetUp()
+    {
+        driver.Navigate().GoToUrl(Url);
+        new WebDriverWait(driver, TimeSpan.FromSeconds(30))
+            .Until(_ => E("ctl00_mainContent_rbtnl_Trip_0").Displayed);
+    }
 
     [OneTimeTearDown]
     public void TearDown() { driver?.Quit(); driver?.Dispose(); }
