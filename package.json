@@ -1,0 +1,16 @@
+{
+  "name": "dropdowns-practise-cross-browser-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cross-browser acceptance tests for the Rahul Shetty Academy flight-booking practice page",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:chrome": "playwright test --project=chrome",
+    "test:brave": "playwright test --project=brave",
+    "test:safari": "playwright test --project=safari"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0"
+  }
+}

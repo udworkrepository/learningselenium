@@ -1,0 +1,50 @@
+name: Cross-browser tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  playwright:
+    name: Playwright (Chrome, Brave, WebKit)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install Chrome and Brave
+        run: |
+          brew install --cask google-chrome brave-browser
+      - run: npm ci
+      - run: npx playwright install webkit
+      - run: npm test
+
+  selenium-nunit:
+    name: Selenium + NUnit (${{ matrix.browser }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chrome, brave, safari]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Install browsers and enable Safari automation
+        run: |
+          if [ "${{ matrix.browser }}" = "chrome" ]; then
+            brew install --cask google-chrome
+          elif [ "${{ matrix.browser }}" = "brave" ]; then
+            brew install --cask brave-browser
+          else
+            sudo safaridriver --enable
+          fi
+      - name: Run NUnit suite
+        env:
+          BROWSER: ${{ matrix.browser }}
+        run: dotnet test tests/selenium/BookingTests.csproj --logger "console;verbosity=normal"
