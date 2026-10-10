@@ -67,6 +67,8 @@ BROWSER=safari dotnet test tests/selenium/BookingTests.csproj
 Selenium runs headed by default. Native Safari WebDriver only runs on macOS.
 Console output lists each TC result; add `--logger "trx;LogFileName=results.trx"` to save a
 per-test report with passed, failed, and skipped statuses under `TestResults/`.
+Safari Selenium skips TC-0002–TC-0004, TC-0010, TC-0012–TC-0014, and TC-0016–TC-0019 based on
+the latest CI failures; these scenarios remain enabled in Chrome and Brave.
 
 ## CI
 
