@@ -48,7 +48,8 @@ npm run test:brave
 npm run test:safari
 ```
 
-The HTML report is written to `playwright-report/`.
+The HTML report is written to `playwright-report/`; the JUnit XML report, including each test's
+TC ID and passed/failed/skipped status, is `test-results/junit.xml`.
 
 ## Run Selenium with NUnit
 
@@ -64,9 +65,11 @@ BROWSER=safari dotnet test tests/selenium/BookingTests.csproj
 ```
 
 Selenium runs headed by default. Native Safari WebDriver only runs on macOS.
+Console output lists each TC result; add `--logger "trx;LogFileName=results.trx"` to save a
+per-test report with passed, failed, and skipped statuses under `TestResults/`.
 
 ## CI
 
 GitHub Actions runs the Playwright suite on Chrome, Brave, and WebKit and the Selenium/NUnit suite
-in a Chrome/Brave/Safari matrix on macOS. It runs on pushes to `main`, pull requests, and manual
-dispatches.
+in a Chrome/Brave/Safari matrix on macOS. Both reports are uploaded as workflow artifacts even if
+tests fail. It runs on pushes to `main`, pull requests, and manual dispatches.

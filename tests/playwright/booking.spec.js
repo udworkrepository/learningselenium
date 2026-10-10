@@ -1,187 +1,112 @@
 const { test, expect } = require("@playwright/test");
-
-const pagePath = "/dropdownsPractise/";
 const origin = "#ctl00_mainContent_ddl_originStation1";
 const destination = "#ctl00_mainContent_ddl_destinationStation1";
-const passengers = "#divpaxinfo";
+const pax = "#divpaxinfo";
+const id = n => `TC-${String(n).padStart(4, "0")}`;
 
-async function airportField(page, id) {
-  const legacyField = page.locator(id);
-  if (await legacyField.count() && await legacyField.isVisible()) {
-    return legacyField;
-  }
-  return page.locator(`${id}_CTXT`);
+async function field(page, selector) {
+  const legacy = page.locator(selector);
+  return await legacy.count() && await legacy.isVisible() ? legacy : page.locator(`${selector}_CTXT`);
 }
 
-async function chooseAirport(page, id, label) {
-  const field = await airportField(page, id);
-  const airportCode = label.match(/\(([^)]+)\)/)[1];
-  if (await field.evaluate(element => element.tagName === "SELECT")) {
-    await field.selectOption({ label });
-    return;
-  }
-
-  const cityName = label.slice(0, label.lastIndexOf(" ("));
-  const suggestions = page.locator(`#gls${id.slice(1)}_CTNR a[value="${airportCode}"]:visible`);
-  await field.click();
-  await page.keyboard.type(cityName);
-  await suggestions.click();
+async function airport(page, selector, label) {
+  const el = await field(page, selector), code = label.match(/\(([^)]+)\)/)[1];
+  if (await el.evaluate(e => e.tagName === "SELECT")) return el.selectOption({ label });
+  await el.click();
+  await page.keyboard.type(label.slice(0, label.lastIndexOf(" (")));
+  await page.locator(`#gls${selector.slice(1)}_CTNR a[value="${code}"]:visible`).click();
 }
 
-test.beforeEach(async ({ page }) => {
-  await page.goto(pagePath, { waitUntil: "domcontentloaded" });
-});
+const scenarios = [
+  ["positive: booking page loads with one-way selected", async p => {
+    await expect(p).toHaveTitle(/QAClickJet/);
+    await expect(p.locator("#ctl00_mainContent_rbtnl_Trip_0")).toBeChecked();
+  }],
+  ["positive: departure list contains Mumbai", async p => {
+    const el = await field(p, origin);
+    if (await el.evaluate(e => e.tagName === "SELECT")) await expect(el.locator("option", { hasText: "Mumbai (BOM)" })).toHaveCount(1);
+    else {
+      await el.click(); await p.keyboard.type("Mumbai");
+      await expect(p.locator(`#gls${origin.slice(1)}_CTNR a[value="BOM"]:visible`)).toBeVisible();
+    }
+  }],
+  ["positive: selecting Mumbai loads arrival choices", async p => {
+    await airport(p, origin, "Mumbai (BOM)");
+    const el = await field(p, destination);
+    if (await el.evaluate(e => e.tagName === "SELECT")) await expect(el.locator("option", { hasText: "Delhi (DEL)" })).toHaveCount(1);
+    else {
+      await el.click();
+      await expect(p.locator(`#gls${destination.slice(1)}_CTNR a[value="DEL"]:visible`)).toBeVisible();
+    }
+  }],
+  ["positive: arrival autocomplete offers Delhi after departure", async p => {
+    await airport(p, origin, "Mumbai (BOM)");
+    const el = await field(p, destination);
+    if (await el.evaluate(e => e.tagName === "SELECT")) {
+      await el.selectOption({ label: "Delhi (DEL)" }); await expect(el).toHaveValue("DEL");
+    } else {
+      await el.click(); await p.keyboard.type("Delhi");
+      await expect(p.locator(`#gls${destination.slice(1)}_CTNR a[value="DEL"]:visible`)).toBeVisible();
+    }
+  }],
+  ...[["Round trip", 1], ["One-way", 0], ["Multicity", 2]].map(([name, n]) => [
+    `positive: ${name} can be selected`, async p => {
+      if (n === 0) await p.locator("#ctl00_mainContent_rbtnl_Trip_1").check();
+      await p.locator(`#ctl00_mainContent_rbtnl_Trip_${n}`).check();
+      await expect(p.locator(`#ctl00_mainContent_rbtnl_Trip_${n}`)).toBeChecked();
+    }
+  ]),
+  ...["USD", "AED"].map(currency => [`positive: ${currency} currency can be selected`, async p => {
+    const el = p.locator("#ctl00_mainContent_DropDownListCurrency");
+    await el.selectOption(currency); await expect(el).toHaveValue(currency);
+  }]),
+  ["positive: fare preference checkboxes can be enabled", async p => {
+    for (const selector of ["friendsandfamily", "SeniorCitizenDiscount", "StudentDiscount", "IndArm"]) {
+      const el = p.locator(`#ctl00_mainContent_chk_${selector}`);
+      await el.check(); await expect(el).toBeChecked();
+    }
+  }],
+  ["positive: country autocomplete selects India", async p => {
+    const el = p.locator("#autosuggest");
+    await el.fill("Ind"); await p.getByText("India", { exact: true }).click(); await expect(el).toHaveValue("India");
+  }],
+  ...[["Adult", "Adt", "2 Adult"], ["Child", "Chd", "1 Child"], ["Infant", "Inf", "1 Infant"]]
+    .map(([name, code, expected]) => [`positive: ${name.toLowerCase()} count can be increased`, async p => {
+      await p.locator(pax).click(); await p.locator(`#hrefInc${code}`).click();
+      await p.locator("#btnclosepaxoption").click(); await expect(p.locator(pax)).toContainText(expected);
+    }]),
+  ["positive: departure and return date controls are available", async p => {
+    for (const n of [1, 2]) {
+      const el = p.locator(`#ctl00_mainContent_view_date${n}`);
+      await expect(el).toBeVisible(); await expect(el).toBeEnabled();
+    }
+  }],
+  ["negative: arrival choices unavailable before departure", async p => {
+    const el = await field(p, destination);
+    if (await el.evaluate(e => e.tagName === "SELECT")) await expect(el.locator("option")).toHaveCount(1);
+    else {
+      await expect(el).toHaveValue("Arrival City");
+      await expect(el).toHaveAttribute("selectedvalue", "");
+    }
+  }],
+  ...[["adult", "Adt", "spanAudlt", "1"], ["child", "Chd", "spanChild", "0"]]
+    .map(([name, code, countId, count]) => [`negative: ${name} count cannot go below ${count}`, async p => {
+      await p.locator(pax).click();
+      await expect(p.locator(`#hrefDec${code}`)).toHaveClass(/pax-disabled/);
+      await expect(p.locator(`#${countId}`)).toHaveText(count);
+    }]),
+  ["negative: more than nine passengers shows an alert", async p => {
+    await p.locator(pax).click();
+    let message = "";
+    p.on("dialog", async d => { message = d.message(); await d.accept(); });
+    for (let n = 1; n <= 9; n++) await p.locator("#hrefIncAdt").click();
+    await expect.poll(() => message).toContain("maximum of 9 passengers");
+  }],
+  ["negative: unmatched country text offers no selection", async p => {
+    await p.locator("#autosuggest").fill("not-a-real-country-xyz");
+    await expect(p.locator(".ui-autocomplete:visible")).toHaveCount(0);
+  }]
+];
 
-test("positive: booking page loads with one-way selected", async ({ page }) => {
-  await expect(page).toHaveTitle(/QAClickJet/);
-  await expect(page.locator("#ctl00_mainContent_rbtnl_Trip_0")).toBeChecked();
-});
-
-test("positive: departure list contains Mumbai", async ({ page }) => {
-  const field = await airportField(page, origin);
-  if (await field.evaluate(element => element.tagName === "SELECT")) {
-    await expect(field.locator("option", { hasText: "Mumbai (BOM)" })).toHaveCount(1);
-  } else {
-    await field.click();
-    await page.keyboard.type("Mumbai");
-    await expect(page.locator(`#gls${origin.slice(1)}_CTNR a[value="BOM"]:visible`)).toBeVisible();
-  }
-});
-
-test("positive: selecting Mumbai loads arrival choices", async ({ page }) => {
-  await chooseAirport(page, origin, "Mumbai (BOM)");
-  const field = await airportField(page, destination);
-  if (await field.evaluate(element => element.tagName === "SELECT")) {
-    await expect(field.locator("option", { hasText: "Delhi (DEL)" })).toHaveCount(1);
-  } else {
-    await field.click();
-    await expect(page.locator(`#gls${destination.slice(1)}_CTNR a[value="DEL"]:visible`)).toBeVisible();
-  }
-});
-
-test("positive: arrival autocomplete offers Delhi after departure is selected", async ({ page }) => {
-  await chooseAirport(page, origin, "Mumbai (BOM)");
-  const field = await airportField(page, destination);
-  if (await field.evaluate(element => element.tagName === "SELECT")) {
-    await field.selectOption({ label: "Delhi (DEL)" });
-    await expect(field).toHaveValue("DEL");
-  } else {
-    await field.click();
-    await page.keyboard.type("Delhi");
-    await expect(page.locator(`#gls${destination.slice(1)}_CTNR a[value="DEL"]:visible`)).toBeVisible();
-  }
-});
-
-test("positive: round trip can be selected", async ({ page }) => {
-  await page.locator("#ctl00_mainContent_rbtnl_Trip_1").check();
-  await expect(page.locator("#ctl00_mainContent_rbtnl_Trip_1")).toBeChecked();
-});
-
-test("positive: one-way can be selected", async ({ page }) => {
-  await page.locator("#ctl00_mainContent_rbtnl_Trip_1").check();
-  await page.locator("#ctl00_mainContent_rbtnl_Trip_0").check();
-  await expect(page.locator("#ctl00_mainContent_rbtnl_Trip_0")).toBeChecked();
-});
-
-test("positive: multicity option can be selected", async ({ page }) => {
-  await page.locator("#ctl00_mainContent_rbtnl_Trip_2").check();
-  await expect(page.locator("#ctl00_mainContent_rbtnl_Trip_2")).toBeChecked();
-});
-
-test("positive: USD currency can be selected", async ({ page }) => {
-  await page.locator("#ctl00_mainContent_DropDownListCurrency").selectOption("USD");
-  await expect(page.locator("#ctl00_mainContent_DropDownListCurrency")).toHaveValue("USD");
-});
-
-test("positive: AED currency can be selected", async ({ page }) => {
-  await page.locator("#ctl00_mainContent_DropDownListCurrency").selectOption("AED");
-  await expect(page.locator("#ctl00_mainContent_DropDownListCurrency")).toHaveValue("AED");
-});
-
-test("positive: fare preference checkboxes can be enabled", async ({ page }) => {
-  for (const id of [
-    "#ctl00_mainContent_chk_friendsandfamily",
-    "#ctl00_mainContent_chk_SeniorCitizenDiscount",
-    "#ctl00_mainContent_chk_StudentDiscount",
-    "#ctl00_mainContent_chk_IndArm"
-  ]) {
-    await page.locator(id).check();
-    await expect(page.locator(id)).toBeChecked();
-  }
-});
-
-test("positive: country autocomplete offers and selects India", async ({ page }) => {
-  const country = page.locator("#autosuggest");
-  await country.fill("Ind");
-  await page.getByText("India", { exact: true }).click();
-  await expect(country).toHaveValue("India");
-});
-
-test("positive: adult passenger count can be increased", async ({ page }) => {
-  await page.locator(passengers).click();
-  await page.locator("#hrefIncAdt").click();
-  await page.getByRole("button", { name: "Done" }).click();
-  await expect(page.locator(passengers)).toContainText("2 Adult");
-});
-
-test("positive: child passenger count can be increased", async ({ page }) => {
-  await page.locator(passengers).click();
-  await page.locator("#hrefIncChd").click();
-  await page.getByRole("button", { name: "Done" }).click();
-  await expect(page.locator(passengers)).toContainText("1 Child");
-});
-
-test("positive: infant passenger count can be increased", async ({ page }) => {
-  await page.locator(passengers).click();
-  await page.locator("#hrefIncInf").click();
-  await page.getByRole("button", { name: "Done" }).click();
-  await expect(page.locator(passengers)).toContainText("1 Infant");
-});
-
-test("positive: departure and return date controls are available", async ({ page }) => {
-  await expect(page.locator("#ctl00_mainContent_view_date1")).toBeVisible();
-  await expect(page.locator("#ctl00_mainContent_view_date1")).toBeEnabled();
-  await expect(page.locator("#ctl00_mainContent_view_date2")).toBeVisible();
-  await expect(page.locator("#ctl00_mainContent_view_date2")).toBeEnabled();
-});
-
-test("negative: arrival choices are unavailable before choosing a departure", async ({ page }) => {
-  const field = await airportField(page, destination);
-  if (await field.evaluate(element => element.tagName === "SELECT")) {
-    await expect(field.locator("option")).toHaveCount(1);
-  } else {
-    await expect(field).toHaveValue("Arrival City");
-    await expect(field).toHaveAttribute("selectedvalue", "");
-  }
-});
-
-test("negative: adult count cannot be reduced below one", async ({ page }) => {
-  await page.locator(passengers).click();
-  await expect(page.locator("#hrefDecAdt")).toHaveClass(/pax-disabled/);
-  await expect(page.locator("#spanAudlt")).toHaveText("1");
-});
-
-test("negative: child count cannot be reduced below zero", async ({ page }) => {
-  await page.locator(passengers).click();
-  await expect(page.locator("#hrefDecChd")).toHaveClass(/pax-disabled/);
-  await expect(page.locator("#spanChild")).toHaveText("0");
-});
-
-test("negative: booking more than nine passengers shows a validation alert", async ({ page }) => {
-  await page.locator(passengers).click();
-  let alertText = "";
-  page.on("dialog", async dialog => {
-    alertText = dialog.message();
-    await dialog.accept();
-  });
-  for (let count = 1; count < 9; count += 1) {
-    await page.locator("#hrefIncAdt").click();
-  }
-  await page.locator("#hrefIncAdt").click();
-  await expect.poll(() => alertText).toContain("maximum of 9 passengers");
-});
-
-test("negative: unmatched country text does not offer a selection", async ({ page }) => {
-  await page.locator("#autosuggest").fill("not-a-real-country-xyz");
-  await expect(page.locator(".ui-autocomplete:visible")).toHaveCount(0);
-});
+test.beforeEach(async ({ page }) => page.goto("/dropdownsPractise/", { waitUntil: "domcontentloaded" }));
+for (const [n, [name, run]] of scenarios.entries()) test(`${id(n + 1)}: ${name}`, ({ page }) => run(page));
