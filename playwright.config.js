@@ -15,7 +15,10 @@ module.exports = defineConfig({
   workers: 2,
   reporter: [["list"], ["html", { open: "never" }], ["junit", { outputFile: "test-results/junit.xml" }]],
   timeout: 30_000,
+  // Stop a stuck run instead of letting CI wait for hours.
+  globalTimeout: process.env.CI ? 20 * 60_000 : 0,
   use: {
+    actionTimeout: 10_000,
     baseURL: "https://rahulshettyacademy.com",
     headless: process.env.PW_HEADLESS !== "false",
     trace: "retain-on-failure",
