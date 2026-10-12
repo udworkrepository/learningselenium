@@ -17,6 +17,15 @@ async function airport(page, selector, label) {
   await page.locator(`#gls${selector.slice(1)}_CTNR a[value="${code}"]:visible`).click();
 }
 
+// The page opens the arrival list by itself after a departure is chosen. A click at that moment
+// closes the list again (or is blocked by it), so click only if the list did not open by itself.
+async function showAirport(page, selector, code) {
+  const option = page.locator(`#gls${selector.slice(1)}_CTNR a[value="${code}"]:visible`);
+  if (!await option.first().waitFor({ timeout: 3000 }).then(() => true, () => false)) await (await field(page, selector)).click();
+  await expect(option).toBeVisible();
+  return option;
+}
+
 const scenarios = [
   ["positive: booking page loads with one-way selected", async p => {
     await expect(p).toHaveTitle(/QAClickJet/);
@@ -34,10 +43,7 @@ const scenarios = [
     await airport(p, origin, "Mumbai (BOM)");
     const el = await field(p, destination);
     if (await el.evaluate(e => e.tagName === "SELECT")) await expect(el.locator("option", { hasText: "Delhi (DEL)" })).toHaveCount(1);
-    else {
-      await el.click();
-      await expect(p.locator(`#gls${destination.slice(1)}_CTNR a[value="DEL"]:visible`)).toBeVisible();
-    }
+    else await showAirport(p, destination, "DEL");
   }],
   ["positive: arrival autocomplete offers Delhi after departure", async p => {
     await airport(p, origin, "Mumbai (BOM)");
@@ -45,8 +51,8 @@ const scenarios = [
     if (await el.evaluate(e => e.tagName === "SELECT")) {
       await el.selectOption({ label: "Delhi (DEL)" }); await expect(el).toHaveValue("DEL");
     } else {
-      await el.click(); await p.keyboard.type("Delhi");
-      await expect(p.locator(`#gls${destination.slice(1)}_CTNR a[value="DEL"]:visible`)).toBeVisible();
+      await (await showAirport(p, destination, "DEL")).click();
+      await expect(el).toHaveAttribute("selectedvalue", "DEL");
     }
   }],
   ...[["Round trip", 1], ["One-way", 0], ["Multicity", 2]].map(([name, n]) => [
